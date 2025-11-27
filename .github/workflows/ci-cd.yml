@@ -1,0 +1,298 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: fabrica-livros/api
+
+jobs:
+  # ===== JOB: Testes e Qualidade de Código =====
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.12]
+    
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: fabrica_livros_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 3s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+
+    - name: 🐍 Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+
+    - name: 📦 Install dependencies
+      run: |
+        cd backend
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-asyncio pytest-cov black isort flake8 mypy
+
+    - name: 🎨 Code formatting check
+      run: |
+        cd backend
+        black --check app/ || (echo "❌ Code not formatted. Run: black app/" && exit 1)
+        isort --check-only app/ || (echo "❌ Imports not sorted. Run: isort app/" && exit 1)
+
+    - name: 🔍 Lint code
+      run: |
+        cd backend
+        flake8 app/ --max-line-length=88 --extend-ignore=E203,W503
+        mypy app/ --ignore-missing-imports || true
+
+    - name: 🧪 Run tests
+      env:
+        ENVIRONMENT: testing
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/fabrica_livros_test
+        REDIS_URL: redis://localhost:6379/0
+        SECRET_KEY: test-secret-key
+      run: |
+        cd backend
+        pytest -v --cov=app --cov-report=xml --cov-report=term-missing
+
+    - name: 📊 Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./backend/coverage.xml
+        flags: backend
+        name: backend-coverage
+
+    - name: 🔒 Security scan
+      run: |
+        cd backend
+        pip install safety bandit
+        safety check -r requirements.txt || true
+        bandit -r app/ -f json -o bandit-report.json || true
+
+  # ===== JOB: Build e Push da Imagem =====
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tags }}
+      image_digest: ${{ steps.build.outputs.digest }}
+
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+
+    - name: 🏗️ Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: 🔐 Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: 🏷️ Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: 🔨 Build and push
+      id: build
+      uses: docker/build-push-action@v5
+      with:
+        context: ./backend
+        target: production
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        build-args: |
+          ENVIRONMENT=production
+          BUILD_DATE=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
+          VCS_REF=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.revision'] }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: 🔍 Scan image for vulnerabilities
+      uses: anchore/scan-action@v3
+      with:
+        image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+        fail-build: false
+        output-format: sarif
+
+    - name: 📊 Upload vulnerability scan results
+      uses: github/codeql-action/upload-sarif@v2
+      with:
+        sarif_file: results.sarif
+
+  # ===== JOB: Deploy para Development =====
+  deploy-dev:
+    needs: [test, build]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
+    environment: development
+
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+
+    - name: 🚀 Deploy to Development
+      env:
+        IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
+      run: |
+        echo "🚀 Deploying to development environment..."
+        echo "Image: $IMAGE_TAG"
+        # Aqui você adicionaria a lógica específica do seu ambiente de dev
+        # Por exemplo: kubectl, docker-compose, ou integração com provedor de cloud
+
+  # ===== JOB: Deploy para Staging =====
+  deploy-staging:
+    needs: [test, build]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push'
+    environment: staging
+
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+
+    - name: 🔧 Setup staging environment
+      env:
+        IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
+        DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+        REDIS_URL: ${{ secrets.STAGING_REDIS_URL }}
+        SECRET_KEY: ${{ secrets.STAGING_SECRET_KEY }}
+      run: |
+        echo "🏗️ Setting up staging environment..."
+        # Configurar staging aqui
+
+    - name: 🧪 Run integration tests
+      run: |
+        echo "🧪 Running integration tests on staging..."
+        # Executar testes de integração aqui
+
+  # ===== JOB: Deploy para Production =====
+  deploy-production:
+    needs: [test, build, deploy-staging]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push'
+    environment: production
+
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+
+    - name: ⏳ Manual approval gate
+      uses: trstringer/manual-approval@v1
+      with:
+        secret: ${{ github.TOKEN }}
+        approvers: ${{ github.repository_owner }}
+        minimum-approvals: 1
+        issue-title: "Deploy to Production - ${{ github.ref_name }}"
+        issue-body: |
+          **Release:** ${{ github.ref_name }}
+          **Image:** ${{ needs.build.outputs.image_tag }}
+          **Commit:** ${{ github.sha }}
+          
+          **Changes:**
+          ${{ github.event.head_commit.message }}
+          
+          Please review and approve this production deployment.
+
+    - name: 🚀 Deploy to Production
+      env:
+        IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
+        DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+        REDIS_URL: ${{ secrets.PROD_REDIS_URL }}
+        SECRET_KEY: ${{ secrets.PROD_SECRET_KEY }}
+        CORS_ORIGINS: ${{ secrets.PROD_CORS_ORIGINS }}
+        GEMINI_API_KEY: ${{ secrets.PROD_GEMINI_API_KEY }}
+        API_HOST: ${{ secrets.PROD_API_HOST }}
+        ACME_EMAIL: ${{ secrets.PROD_ACME_EMAIL }}
+      run: |
+        echo "🚀 Deploying to production environment..."
+        echo "Image: $IMAGE_TAG"
+        
+        # Exemplo de deploy com docker-compose remoto
+        # ssh user@prod-server "cd /opt/fabrica-livros && \
+        #   export VERSION=${{ github.ref_name }} && \
+        #   ./scripts/deploy-prod.sh"
+
+    - name: 📧 Notify deployment
+      if: always()
+      uses: 8398a7/action-slack@v3
+      with:
+        status: ${{ job.status }}
+        channel: '#deployments'
+        webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+        text: |
+          Production deployment ${{ job.status }}!
+          Version: ${{ github.ref_name }}
+          Image: ${{ needs.build.outputs.image_tag }}
+
+  # ===== JOB: Release Notes =====
+  release:
+    needs: [deploy-production]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push'
+
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: 📝 Generate release notes
+      id: release_notes
+      run: |
+        # Gerar changelog desde o último tag
+        echo "## Changes" > release_notes.md
+        git log --pretty=format:"- %s (%h)" $(git describe --tags --abbrev=0 HEAD^)..HEAD >> release_notes.md
+
+    - name: 🎉 Create GitHub Release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref_name }}
+        release_name: Release ${{ github.ref_name }}
+        body_path: release_notes.md
+        draft: false
+        prerelease: false

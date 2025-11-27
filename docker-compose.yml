@@ -1,68 +1,114 @@
+# Docker Compose para desenvolvimento
+
 services:
+  # ===== Backend API =====
   backend:
     build:
       context: ./backend
-      dockerfile: Dockerfile
-    container_name: fabrica_backend
+      target: development
+      args:
+        ENVIRONMENT: development
+        BUILD_DATE: ${BUILD_DATE:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}
+        VCS_REF: ${VCS_REF:-$(git rev-parse HEAD)}
+    container_name: fabrica-api-dev
+    restart: unless-stopped
     ports:
       - "8000:8000"
     volumes:
+      # Montar código para desenvolvimento com hot reload
       - ./backend:/app
+      - backend_logs:/app/logs
     environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/fabrica_livros
-      - REDIS_URL=redis://redis:6379/0
-      - SECRET_KEY=temporary_secret_key_for_dev_environment
+      ENVIRONMENT: development
+      DEBUG: true
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/fabrica_livros_dev
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: dev-secret-key-change-in-production
+      LOG_LEVEL: DEBUG
+      LOG_FORMAT: text
+      CORS_ORIGINS: "http://localhost:3000,http://localhost:3001"
+      RATE_LIMIT_ENABLED: false
     depends_on:
-      - db
-      - redis
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - fabrica-network
 
-  frontend:
+  # ===== Celery Worker =====
+  celery-worker:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    container_name: fabrica_frontend
-    ports:
-      - "3000:3000"
+      context: ./backend
+      target: development
+    container_name: fabrica-celery-dev
+    restart: unless-stopped
+    command: celery -A app.worker.celery_app worker --loglevel=info --concurrency=2
     volumes:
-      - ./frontend:/app
-      - /app/node_modules
+      - ./backend:/app
+      - backend_logs:/app/logs
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      ENVIRONMENT: development
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/fabrica_livros_dev
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: dev-secret-key-change-in-production
+      LOG_LEVEL: DEBUG
+      RUN_MIGRATIONS: false
     depends_on:
-      - backend
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - fabrica-network
 
-  db:
-    image: postgres:15-alpine
-    container_name: fabrica_db
+  # ===== PostgreSQL Database =====
+  postgres:
+    image: postgres:16-alpine
+    container_name: fabrica-postgres-dev
+    restart: unless-stopped
     ports:
       - "5432:5432"
     environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=fabrica_livros
+      POSTGRES_DB: fabrica_livros_dev
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - fabrica-network
 
+  # ===== Redis =====
   redis:
     image: redis:7-alpine
-    container_name: fabrica_redis
+    container_name: fabrica-redis-dev
+    restart: unless-stopped
     ports:
       - "6379:6379"
-
-  worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: fabrica_worker
-    command: celery -A app.worker.celery_app worker --loglevel=info
-    environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/fabrica_livros
-      - REDIS_URL=redis://redis:6379/0
-      - SECRET_KEY=temporary_secret_key_for_dev_environment
-    depends_on:
-      - backend
-      - redis
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - fabrica-network
 
 volumes:
   postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  backend_logs:
+    driver: local
+
+networks:
+  fabrica-network:
+    driver: bridge

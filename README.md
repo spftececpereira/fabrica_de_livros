@@ -30,76 +30,89 @@ O projeto segue uma arquitetura de microsserviços simplificada (Monorepo):
 - **Exportação PDF**: Download dos livros gerados em formato PDF pronto para impressão.
 - **Dashboard**: Gerenciamento da biblioteca pessoal de livros.
 
-## 🛠️ Pré-requisitos
+## ⚙️ Configuração e Variáveis de Ambiente
 
-- [Docker](https://www.docker.com/) e [Docker Compose](https://docs.docker.com/compose/) instalados.
-- (Opcional) Python 3.12+ e Node.js 20+ para desenvolvimento local fora do Docker.
+O projeto utiliza variáveis de ambiente para configuração. Você deve criar um arquivo `.env` na pasta `backend/` (para desenvolvimento local sem Docker) ou configurar as variáveis no `docker-compose.yml` (já pré-configurado para dev).
 
-## 🏁 Como Iniciar (Rápido)
+### Variáveis Obrigatórias (Backend)
 
-1.  **Clone o repositório:**
-    ```bash
-    git clone https://github.com/seu-usuario/fabrica-livros.git
-    cd fabrica-livros
-    ```
+| Variável | Descrição | Exemplo |
+| :--- | :--- | :--- |
+| `DATABASE_URL` | Connection string do PostgreSQL (Async) | `postgresql+asyncpg://user:pass@host:5432/db` |
+| `REDIS_URL` | URL de conexão do Redis | `redis://host:6379/0` |
+| `SECRET_KEY` | Chave secreta para assinatura de tokens JWT | `sua_chave_super_secreta` |
+| `GEMINI_API_KEY` | Chave da API do Google Gemini (para geração de livros) | `AIzaSy...` |
 
-2.  **Configure as Variáveis de Ambiente:**
-    Copie o arquivo de exemplo e preencha com sua chave da API do Google Gemini.
+### Variáveis Opcionais
+
+| Variável | Descrição | Padrão |
+| :--- | :--- | :--- |
+| `ALGORITHM` | Algoritmo de criptografia do JWT | `HS256` |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | Tempo de expiração do token (minutos) | `30` |
+
+## 🐳 Desenvolvimento com Docker (Recomendado)
+
+A maneira mais fácil de rodar o projeto é usando Docker Compose, pois ele sobe automaticamente o Banco de Dados, Redis, Backend, Frontend e Worker.
+
+1.  **Configure a API Key da IA:**
+    Crie um arquivo `.env` na raiz do projeto (ou edite o `docker-compose.yml` diretamente se preferir, mas não commite segredos):
     ```bash
     cp .env.example .env
     ```
-    Edite o arquivo `.env` e adicione sua `GEMINI_API_KEY`.
+    Edite o `.env` e adicione sua `GEMINI_API_KEY`.
 
-3.  **Inicie os Serviços com Docker:**
+2.  **Inicie os serviços:**
     ```bash
     docker compose up -d --build
     ```
+    Isso irá construir as imagens e iniciar os containers:
+    - `backend`: http://localhost:8000
+    - `frontend`: http://localhost:3000
+    - `db`: PostgreSQL (porta 5432)
+    - `redis`: Redis (porta 6379)
+    - `worker`: Processamento de tarefas em segundo plano (Celery)
 
-4.  **Acesse a Aplicação:**
-    - **Frontend**: [http://localhost:3000](http://localhost:3000)
-    - **Backend API Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
-    - **Backend Admin**: [http://localhost:8000/redoc](http://localhost:8000/redoc)
+3.  **Logs:**
+    Para ver os logs de todos os serviços:
+    ```bash
+    docker compose logs -f
+    ```
 
-## 📂 Estrutura do Projeto
+## 🔧 Desenvolvimento Local (Híbrido)
 
-```
-.
-├── backend/                # Aplicação FastAPI
-│   ├── app/
-│   │   ├── api/            # Endpoints (v1)
-│   │   ├── core/           # Configurações e Segurança
-│   │   ├── models/         # Modelos SQLAlchemy
-│   │   ├── schemas/        # Schemas Pydantic
-│   │   ├── services/       # Lógica de Negócio (AI, PDF)
-│   │   └── worker/         # Tarefas Celery
-│   ├── alembic/            # Migrações de Banco de Dados
-│   └── requirements.txt    # Dependências Python
-├── frontend/               # Aplicação Next.js
-│   ├── app/                # App Router (Pages & Layouts)
-│   ├── components/         # Componentes React (UI)
-│   ├── lib/                # Utilitários (API Client)
-│   └── package.json        # Dependências Node.js
-├── docker-compose.yml      # Orquestração dos serviços
-└── .env.example            # Exemplo de variáveis de ambiente
-```
+Se você deseja rodar o **Backend** ou **Frontend** fora do Docker (para debugar ou desenvolver mais rápido), você **PRECISA** ter os serviços de infraestrutura (Postgres e Redis) rodando.
 
-## 🔧 Desenvolvimento Local
+1.  **Suba apenas a infraestrutura:**
+    ```bash
+    docker compose up -d db redis
+    ```
 
-### Backend
-```bash
-cd backend
-python -m venv venv
-source venv/bin/activate  # ou venv\Scripts\activate no Windows
-pip install -r requirements.txt
-uvicorn app.main:app --reload
-```
+2.  **Backend Local:**
+    - Crie o arquivo `backend/.env` com as configurações apontando para `localhost`:
+      ```env
+      DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/fabrica_livros
+      REDIS_URL=redis://localhost:6379/0
+      SECRET_KEY=dev_secret
+      GEMINI_API_KEY=sua_chave
+      ```
+    - Instale as dependências e rode:
+      ```bash
+      cd backend
+      python -m venv venv
+      source venv/bin/activate
+      pip install -r requirements.txt
+      uvicorn app.main:app --reload
+      ```
 
-### Frontend
-```bash
-cd frontend
-pnpm install
-pnpm dev
-```
+3.  **Frontend Local:**
+    - Certifique-se que o backend está rodando.
+    - Instale e rode:
+      ```bash
+      cd frontend
+      pnpm install
+      pnpm dev
+      ```
+
 
 ## 🧪 Testes
 
@@ -111,3 +124,13 @@ docker compose exec backend pytest
 ## 📄 Licença
 
 Este projeto está licenciado sob a licença MIT. Veja o arquivo [LICENSE](LICENSE) para mais detalhes.
+
+
+
+As seguintes pastas vazias precisam ser removidas manualmente (não posso deletar diretórios vazios):                 │
+│                                                                                                                      │
+│  • frontend/app/api/badges/all                                                                                       │
+│  • frontend/app/api/books/[id]/pdf                                                                                   │
+│  • frontend/app/auth/callback                                                                                        │
+│  • frontend/app/login, frontend/app/register, frontend/app/signup                                                    │
+│  • frontend/lib/hooks, frontend/lib/supabase                                                                         │

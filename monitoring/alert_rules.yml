@@ -1,0 +1,170 @@
+# Regras de alertas para Fábrica de Livros
+groups:
+  - name: fabrica-livros-alerts
+    interval: 30s
+    rules:
+      # ===== ALERTAS DE API =====
+      - alert: APIHighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: critical
+          service: api
+        annotations:
+          summary: "Taxa alta de erros na API"
+          description: "A API está retornando mais de 10% de erros 5xx nos últimos 5 minutos"
+
+      - alert: APIHighLatency
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 1
+        for: 5m
+        labels:
+          severity: warning
+          service: api
+        annotations:
+          summary: "Latência alta na API"
+          description: "95% das requisições estão levando mais de 1 segundo"
+
+      - alert: APIDown
+        expr: up{job="fabrica-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: api
+        annotations:
+          summary: "API está fora do ar"
+          description: "A API da Fábrica de Livros não está respondendo"
+
+      # ===== ALERTAS DE BANCO DE DADOS =====
+      - alert: DatabaseConnectionsHigh
+        expr: pg_stat_activity_count > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: database
+        annotations:
+          summary: "Muitas conexões no PostgreSQL"
+          description: "PostgreSQL tem mais de 80 conexões ativas"
+
+      - alert: DatabaseDown
+        expr: up{job="postgres"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: database
+        annotations:
+          summary: "Banco de dados fora do ar"
+          description: "PostgreSQL não está respondendo"
+
+      - alert: DatabaseDiskSpaceHigh
+        expr: (pg_stat_database_size_bytes / (1024^3)) > 8
+        for: 5m
+        labels:
+          severity: warning
+          service: database
+        annotations:
+          summary: "Uso alto de disco no banco"
+          description: "Banco de dados está usando mais de 8GB de espaço"
+
+      # ===== ALERTAS DE REDIS =====
+      - alert: RedisDown
+        expr: up{job="redis"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: redis
+        annotations:
+          summary: "Redis fora do ar"
+          description: "Redis não está respondendo"
+
+      - alert: RedisMemoryHigh
+        expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          service: redis
+        annotations:
+          summary: "Uso alto de memória no Redis"
+          description: "Redis está usando mais de 80% da memória disponível"
+
+      # ===== ALERTAS DE CELERY =====
+      - alert: CeleryHighQueueLength
+        expr: celery_queue_length > 100
+        for: 5m
+        labels:
+          severity: warning
+          service: celery
+        annotations:
+          summary: "Fila do Celery muito longa"
+          description: "Há mais de 100 tasks na fila do Celery"
+
+      - alert: CeleryWorkerDown
+        expr: celery_workers == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: celery
+        annotations:
+          summary: "Nenhum worker Celery ativo"
+          description: "Não há workers Celery processando tasks"
+
+      - alert: CeleryHighFailureRate
+        expr: rate(celery_task_sent_total{state="FAILURE"}[10m]) / rate(celery_task_sent_total[10m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          service: celery
+        annotations:
+          summary: "Taxa alta de falhas no Celery"
+          description: "Mais de 10% das tasks estão falhando"
+
+      # ===== ALERTAS DE SISTEMA =====
+      - alert: HighCPUUsage
+        expr: 100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "Uso alto de CPU"
+          description: "CPU está acima de 80% por mais de 5 minutos"
+
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "Uso alto de memória"
+          description: "Memória está acima de 85%"
+
+      - alert: DiskSpaceHigh
+        expr: (1 - (node_filesystem_avail_bytes / node_filesystem_size_bytes)) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "Espaço em disco baixo"
+          description: "Uso de disco está acima de 85%"
+
+      # ===== ALERTAS DE NEGÓCIO =====
+      - alert: BookGenerationFailureSpike
+        expr: increase(business_metric_book_generation_failure_total[1h]) > 10
+        for: 0m
+        labels:
+          severity: warning
+          service: business
+        annotations:
+          summary: "Muitas falhas na gera\u00e7\u00e3o de livros"
+          description: "Mais de 10 gera\u00e7\u00f5es de livros falharam na \u00faltima hora"
+
+      - alert: LowUserRegistration
+        expr: increase(business_metric_user_registration_total[24h]) < 5
+        for: 0m
+        labels:
+          severity: info
+          service: business
+        annotations:
+          summary: "Poucos registros de usu\u00e1rio"
+          description: "Menos de 5 usu\u00e1rios se registraram nas \u00faltimas 24 horas"

@@ -1,5 +1,5 @@
 from typing import List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from datetime import datetime
 from app.models.book import BookStatus
 
@@ -15,12 +15,12 @@ class Page(PageBase):
     id: int
     book_id: int
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class BookBase(BaseModel):
     title: str
-    theme: str
+    description: Optional[str] = None
+    pages_count: int
     style: str
 
 class BookCreate(BookBase):
@@ -28,15 +28,21 @@ class BookCreate(BookBase):
 
 class BookUpdate(BaseModel):
     title: Optional[str] = None
-    status: Optional[str] = None
+    description: Optional[str] = None
+    pages_count: Optional[int] = None
+    style: Optional[str] = None
 
-class Book(BookBase):
+class BookResponse(BookBase):
     id: int
     status: str
-    owner_id: int
+    user_id: int
+    cover_image: Optional[str] = None
+    pdf_file: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
     pages: List[Page] = []
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
+# Alias para compatibilidade
+Book = BookResponse

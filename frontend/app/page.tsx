@@ -23,7 +23,7 @@ export default function HomePage() {
             <Link href="/login">
               <Button variant="ghost">Entrar</Button>
             </Link>
-            <Link href="/signup">
+            <Link href="/register">
               <Button>Começar Grátis</Button>
             </Link>
           </nav>
@@ -41,7 +41,7 @@ export default function HomePage() {
             criar páginas incríveis para você.
           </p>
           <div className="flex flex-col items-center justify-center gap-4 pt-4 sm:flex-row">
-            <Link href="/signup">
+            <Link href="/register">
               <Button size="lg" className="gap-2 btn-vibrant">
                 <Sparkles className="h-5 w-5" />
                 Criar Meu Primeiro Livro
@@ -174,7 +174,7 @@ export default function HomePage() {
           <p className="mx-auto mt-6 max-w-2xl text-xl text-muted-foreground">
             Junte-se a milhares de pais, professores e avós que já criaram livros incríveis.
           </p>
-          <Link href="/signup">
+          <Link href="/register">
             <Button size="lg" className="mt-8 gap-2 btn-vibrant">
               <Sparkles className="h-5 w-5" />
               Começar Agora - É Grátis
