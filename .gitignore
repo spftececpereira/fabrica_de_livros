@@ -47,3 +47,5 @@ htmlcov/
 .pnpm-store/
 frontend/.pnpm-store/
 
+# pnpm specific node_modules structure to ignore
+frontend/node_modules/.pnpm/
